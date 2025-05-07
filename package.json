@@ -1,0 +1,13 @@
+{
+  "name": "vite-plugin-open-comp-in-vscode",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {},
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "html-parse-stringify": "^3.0.1"
+  }
+}
