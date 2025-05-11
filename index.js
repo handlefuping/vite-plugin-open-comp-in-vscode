@@ -1,5 +1,8 @@
 import HTML from 'html-parse-stringify'
+import babel from '@babel/core'
 import { join } from 'path';
+import syntaxJsx from '@babel/plugin-syntax-jsx';
+import * as t from '@babel/types';
 
 const PLUGINNAME = 'open-comp-in-vscode'
 const VSCODELINK = 'vscode://file://'
@@ -42,7 +45,55 @@ const styleContent = `
 `
 const templateReg = /<(template)>([\s\S]*)<\/\1>/
 
-const stepupRenderReg = /(setup\s*\([\s\S]*\s+(?:return|\([^)]*\)\s*=>)\s*\(?\s*)(<([^>]+)>[\s\S]*<\/\3>)(\s*\)?\s*})/
+// const stepupRenderReg = /(setup\s*\([\s\S]*\s+(?:return|\([^)]*\)\s*=>)\s*\(?\s*)(<([^>]+)>[\s\S]*<\/\3>)(\s*\)?\s*})/
+const scriptReg = /(<(script)\s+lang\s*=\s*(['"])jsx\3>)([\s\S]*)<\/\2>/
+
+
+function plugin() {
+  const addAttribute = (jsx, url) => {
+    const newAttribute = t.jsxAttribute(t.jsxIdentifier('data-file'), t.stringLiteral(url))
+    jsx.node.openingElement.attributes.push(
+      newAttribute
+    );
+  }
+  
+  return {
+    inherits: syntaxJsx.default,
+    visitor: {
+      Function(path, state) {
+        const { url } = state.opts
+        if (path.isObjectMethod() && t.isIdentifier(path.node.key, { name: "setup" })) {
+          const setupFuncBody = path.get('body').get('body')
+          const setupReturnStatement = setupFuncBody[setupFuncBody.length - 1]
+          if (setupReturnStatement?.isReturnStatement()) {
+            let render = setupReturnStatement.get('argument')
+            if (render?.isFunctionDeclaration() || render?.isFunctionExpression() || render?.isArrowFunctionExpression()) {
+              let jsx = null
+              if (render.get('body')?.isBlockStatement()) {
+                const renderFuncBody = render.get('body').get('body')
+                const renderReturnStatement = renderFuncBody[renderFuncBody.length - 1]
+                if (renderReturnStatement?.isReturnStatement()) {
+                  jsx = renderReturnStatement.get('argument')
+                }
+              } else {
+                jsx = render.get('body')
+              }
+              if (jsx?.isJSXElement()) {
+                addAttribute(jsx, url)
+              } else if (jsx?.isJSXFragment()) {
+                jsx.get('children').forEach(child => {
+                  if (child?.isJSXElement()) {
+                    addAttribute(child, url)
+                  }
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
 
 const openCompInVscode = ({
   ext = ['.vue', '.jsx', '.tsx'],
@@ -100,15 +151,16 @@ const openCompInVscode = ({
           
           return `<template>${transformHtml(html)}</template>`
         })
-        newCode = newCode.replace(stepupRenderReg, (match, group1, html, group3, group4) => {
-          if (!html) {
+        newCode = newCode.replace(scriptReg, (match, group1, group2, group3, script) => {
+          if (!script) {
             return match
           }
-          return `${group1}${transformHtml(html)}${group4}`
-
+          const {code} = babel.transformSync(script, {
+            "plugins": [[plugin, {url: `${VSCODELINK}${id}`}]]
+          });
+          return `${group1}${code}</script>`
         })
         return newCode
-
       }
     },
   }
